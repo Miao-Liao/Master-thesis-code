@@ -1,0 +1,889 @@
+---
+title: "Thesis model"
+author: "Miao Liao"
+date: "2024-05-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(patchwork)
+library(pinyin)
+library(sf)
+library(tmap)
+library(tmaptools)
+library(gridExtra)
+library(sp)
+library(spdep)
+library(sf)
+```
+
+In studying the differences in the impact of the second-child policy on birth rates across various provinces in China, I have selected the following variables for analysis:
+
+Family Income: Consumer Price Index, Per Capita Disposable Income
+
+Education Level: National education funding, Proportion of Education Employment, Number of Higher Education Students per 100,000 People
+
+Economic Development: Urban Registered Unemployment Rate, Local Fiscal Expenditure, GDP
+
+Social Security: Number of Participants in Urban and Rural Resident Social Pension Insurance, Number of Health Technicians per 10,000 People,Number of Participants in Maternity Insurance at Year-end, Per Capita Residential Sales
+
+
+# Data Cleaning
+```{r}
+# File names and English names
+file_names <- c("城乡居民社会养老保险参保人数占比.xls", "城镇登记失业率.xls", "地方财政支出.xls", 
+                "地区生产总值.xlsx", "国家财政性教育经费.xls", "教育就业人数占比.xls", 
+                "居民消费价格指数.xls", "每10万人口高等教育在校人数.xls", 
+                "每万人拥有卫生技术人员.xls", "年末参加生育保险人数.xls", 
+                "人均可支配收入.xls", "人均住宅销售额.xls", "生育率.xlsx")
+english_names <- c("social_insurance_participation", "urban_unemployment_rate", 
+                   "local_fiscal_expenditure", "GDP", "national_education_funding", 
+                   "education_employment_rate", "CPI", "HE_students_per_100000", 
+                   "health_technicians_per_10000", "maternity_insurance_participation", 
+                   "per_capita_disposable_income", "per_capita_residential_sales", 
+                   "fertility_rate")
+
+data_list <- lapply(file_names, function(file) {
+  # Read data
+  data <- read_excel(file,
+                     range = cell_rows(4:35))
+  # Determine column names for pivot_longer()
+  col_names <- colnames(data)[-1]  # Exclude the first column
+  # Pivot the data to long format
+  data_long <- pivot_longer(data, cols = all_of(col_names), names_to = "year", values_to = "value")
+  # Extract year from year column
+  data_long$year <- gsub("年", "", data_long$year)
+  #Convert value to numeric
+  data_long$value <- as.numeric(data_long$value)
+  # Add file name as a column
+  data_long$file_name <- file
+  # Add English name as a column
+  data_long$english_name <- english_names[file_names == file]
+  # Return the modified data
+  return(data_long)
+})
+
+
+# Removes NULL elements from the list
+data_list <- data_list[!sapply(data_list, is.null)]
+
+
+# Bind all data frames together
+final_data <- bind_rows(data_list)
+# Print the first few rows of the final data frame
+final_data$Region <- NULL
+final_data$file_name <- NULL
+head(final_data)
+
+
+# Pivot the data from long to wide format
+final_data_wide <- pivot_wider(final_data, names_from = english_name, values_from = value)
+
+# Print the first few rows of the final data frame
+head(final_data_wide)
+
+
+final_data_wide$province
+```
+
+
+```{r}
+DBDQ <- st_read("省会城市.shp")
+setwd("C:/Users/liaom/Desktop/论文/论文/中国标准地图-审图号GS(2020)4619号-shp格式")
+DBDQ2 <- st_read("C:/Users/liaom/Desktop/论文/论文/中国标准地图-审图号GS(2020)4619号-shp格式/省级行政区.shp")
+
+DBDQ
+DBDQ2$name_1 <- c("Heilongjiang", "Xinjiang", "Shanxi", "Ningxia", "Tibet", "Shandong", 
+                  "Henan", "Jiangsu", "Anhui", "Hubei", "Zhejiang", "Jiangxi", "Hunan", 
+                  "Yunnan", "Guizhou", "Fujian", "Guangxi", "Guangdong", "Hainan", "Jilin", 
+                  "Liaoning", "Tianjin", "Qinghai", "Gansu", "Shaanxi", "Mongolia", "Chongqin", 
+                  "Hebei", "Shanghai", "Beijing", "Taiwan", "Xianggang", "Aomen", "Sichuan")
+
+DBDQ$name
+
+```
+
+# Time-series bar graph of the average birth rate
+```{r}
+str(final_data_wide$fertility_rate)
+
+average_fertility_rate <- aggregate(fertility_rate ~ year, data = final_data_wide, FUN = mean)
+average_capita<- aggregate(per_capita_residential_sales ~ year, data = final_data_wide, FUN = mean)
+Fertility_plot <- ggplot(average_capita, aes(x = year, y = per_capita_residential_sales)) +
+  geom_bar(stat = "identity", fill = "skyblue") +  
+  labs(
+    x = "Year", 
+    y = "Average Fertility Rate", 
+    title = "Average Fertility Rate Over Time"
+  ) +
+  theme_minimal()  
+
+Fertility_plot <- ggplot(average_fertility_rate, aes(x = year, y = fertility_rate)) +
+  geom_bar(stat = "identity", fill = "skyblue") +  
+  labs(
+    x = "Year", 
+    y = "Average Fertility Rate", 
+    title = "Average Fertility Rate Over Time"
+  ) +
+  theme_minimal()  
+
+Fertility_plot
+```
+```{r}
+data <- read_xlsx("出生率.xlsx")
+ggplot(data, aes(x = factor(Year))) +
+  geom_bar(aes(y = `Birth rate`), stat = "identity", fill = "skyblue", alpha = 0.7) +
+  geom_line(aes(y = `Birth rate`), group = 1, color = "red", size = 1) +
+  geom_point(aes(y = `Birth rate`), color = "red", size = 2) +
+  labs(title = "Birth Rate Over the Years",
+       x = "Year",
+       y = "Birth Rate (‰)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+```
+
+From the above chart, it can be observed that from 2004 to 2015, the birth rate remained relatively stable, hovering around 11‰. There was a slight increase from 2016 to 2017. However, starting in 2018, the birth rate began to decline sharply, falling below 7.5‰ by 2022.
+
+To analyze the reasons for this rapid decline:
+
+1.Population Policy Adjustments: Changes in population policies could be a significant factor influencing the variations in birth rates.
+
+2.Economic Factors: With the improvement in economic development, living costs and educational expenses have been continuously increasing. This may lead to couples delaying childbirth or choosing not to have children, contributing to the decline in birth rates.
+
+3.Changes in Social Structure: The acceleration of urbanization and changes in lifestyle have altered family structures and living patterns. These changes might affect people's attitudes towards childbirth and their decisions regarding having children.
+
+```{r}
+data_to_map <- final_data_wide[, c("province", "year", "fertility_rate")]
+
+# Convert map data (DBDQ2) to sf objects
+DBDQ2_sf <- st_as_sf(DBDQ2)
+
+
+# Create a list to store map objects
+map_list <- list()
+
+# Loop over three years and draw the map and store it in the list
+for (year in c(2012, 2016, 2022)) {
+  data_year <- data_to_map[data_to_map$year == year, ]
+  # Merge data and map boundaries
+  data_map <- left_join(DBDQ2_sf, data_year, by = c("name_1" = "province"))
+  map <- tm_shape(data_map) +
+    tm_polygons(col = "fertility_rate",
+                style = "quantile",
+                n = 5, 
+                palette = "Blues",
+                title = paste("Fertility Rate in", year),
+                legend.position = c("right", "bottom"),
+                textNA = "Missing Data",
+                border.col = "grey50") +
+    tm_layout(title.position = c("center", "top"))
+  print(as.data.frame(data_map[,c(117,119,120)]))
+  map_list[[length(map_list) + 1]] <- map
+}
+
+# Creating a map object
+maps_combined <- tmap_arrange(map_list[[1]], map_list[[2]], map_list[[3]], nrow = 3, ncol = 1)
+
+maps_combined
+```
+
+```{r}
+
+```
+
+
+
+
+Based on the above chart, the spatial distribution and changes in birth rates across China's provinces can be observed for the years 2012, 2016, and 2022.
+
+In 2012, the birth rates were relatively high in the northwest regions such as Xinjiang, Qinghai, and Tibet, with rates of 15.32‰, 14.30‰, and 15.48‰ respectively. Conversely, the northeastern regions, including Jilin, Liaoning, and Heilongjiang, had lower birth rates, recorded at 5.73‰, 6.15‰, and 6.60‰ respectively.
+
+By 2016, Shandong's birth rate had significantly increased to 17.89‰, surpassing Xinjiang in the northwest to become the province with the highest birth rate. Fujian also saw a substantial rise in its birth rate, reaching 14.50‰. Meanwhile, the northern regions of Jilin, Heilongjiang, and Liaoning continued to maintain low birth rates.
+
+In 2022, Shandong still had a relatively high birth rate but experienced a slight decline to 6.71‰, while Fujian's birth rate slightly increased to 7.07‰. In contrast, the birth rates in the northwest regions, such as Xinjiang and Qinghai, saw a notable decline, dropping to 6.53‰ and 10.60‰ respectively. Over this period, the differences between the southern and northern regions became more pronounced. Southern provinces like Shandong and Fujian showed an increasing trend in birth rates, gradually surpassing some of the northern provinces, whereas the northern provinces like Jilin, Heilongjiang, and Liaoning continued to have relatively low birth rates.
+
+
+# Analysis of spatial clustering effect of birth rate
+
+Using the Moran's Index to detect spatial autocorrelation in geographic data involves determining whether the data values of a particular region are related to those of neighboring regions. If the Moran's Index is significantly positive, it indicates the presence of spatial clustering effects; if negative, it indicates spatial dispersion effects.
+
+If the data show spatial dependence, one might consider using spatial regression models for variable analysis.
+
+Additionally, by examining the changes in the Moran's Index over different years, we can observe the spatial distribution changes in birth rates before and after the implementation of the second-child policy. If the second-child policy impacts birth rates, it may lead to changes in the Moran's Index, such as an increase or decrease in clustering effects.
+
+```{r}
+
+DBDQ$province <- c("Xinjiang", "Tibet", "Qinghai", "Gansu", "Sichuan", "Chongqin", "Guizhou", 
+                   "Yunnan", "Ningxia", "Shaanxi", "Guangxi", "Hainan", "Guangdong", "Hunan", "Jiangxi", 
+                   "Fujian", "Taiwan", "Zhejiang", "Shanghai", "Hubei", "Anhui", "Jiangsu", "Henan", "Shandong", 
+                   "Hebei", "Shanxi","Mongolia", "Tianjin","Liaoning", "Jilin", "Heilongjiang",  "Beijing", "Hong Kong", 
+                   "Macao")
+
+# Combine final_data_wide and DBDQ
+final_data_geo <- left_join(final_data_wide, DBDQ, by = c("province" = "province"))
+final_data_geo <- final_data_geo[,c(1:15,18)]
+
+
+# Create a data frame to store results
+moran_results <- data.frame(year = c(2004:2019,2021:2022),
+                            moran_I = numeric(18),
+                            p_value = numeric(18),
+                            z_value = numeric(18))
+
+# Loop over each year and calculate Moran's I
+for (i in 1:18) {
+  # Filter data for the specific year
+  data_year <- final_data_geo[final_data_geo$year == moran_results$year[i], ]
+    
+  # Extract coordinates
+  coords <- st_coordinates(st_as_sf(data_year))
+  coords_df <- data.frame(X = coords[, 1], Y = coords[, 2])
+  coords_mat <- as.matrix(coords_df)
+  
+  # Calculate k-nearest neighbor spatial weights
+  nb <- knn2nb(knearneigh(coords_mat, k = 15))
+  listw <- nb2listw(nb, style = "B", zero.policy = TRUE)
+  
+  # Calculate Moran's I
+  moran_results$moran_I[i] <- moran(data_year$fertility_rate, listw, n = 31, S0=Szero(listw))$I
+  moran_mc <- moran.mc(data_year$fertility_rate, listw, nsim=999)
+  
+  
+  # Store p-value and Z-value
+  
+  moran_results$p_value[i] <- moran_mc$p.value
+  moran_results$z_value[i] <- (moran_results$moran_I[i] - mean(moran_mc$res)) / sd(moran_mc$res)
+}
+
+# Print the result
+print(moran_results)
+
+
+```
+
+Moran's I Values:
+
+The Moran's Index values for all years are positive, indicating that there is spatial positive autocorrelation in the birth rates among Chinese provinces during these years. This means that provinces with high birth rates tend to be adjacent to other provinces with high birth rates, and provinces with low birth rates tend to be adjacent to other provinces with low birth rates.
+
+p-values:
+
+All p-values are less than 0.05 (with most years having a p-value of 0.001), indicating that the Moran's Index is statistically significant. This means we can reject the null hypothesis of zero spatial autocorrelation, further supporting the presence of spatial positive autocorrelation.
+
+z-values:
+
+The z-values are also positive and relatively high across all years, further demonstrating the significance of the Moran's Index. The z-value indicates the extent to which the Moran's Index deviates from a random distribution, with higher z-values (such as 7.091990 in 2018) signifying a very significant spatial clustering effect in birth rates for these years.
+
+The significant spatial autocorrelation indicated by the Moran's Index shows a notable spatial clustering effect in birth rates across provinces, and it is essential to evaluate the geographic impact of the second-child policy. In subsequent spatial econometric model analyses, spatial dependence must be considered. Appropriate spatial regression models (such as the spatial lag model or the spatial error model) can be chosen to further analyze the factors influencing birth rates and the effects of the policy.
+
+```{r}
+ggplot(moran_results, aes(x = year, y = moran_I)) +
+  geom_line(color = "skyblue", size = 1) +
+  geom_point(shape = 17, size = 5, fill = "skyblue") +
+  labs(title = "
+Moran's I Over Time Plot", x = "Year", y = "Moran's I")
+```
+Over time, the Moran's I value fluctuated between 2004 and 2019, but overall it exhibited stable spatial autocorrelation. This indicates that there is a consistent spatial pattern in birth rates among Chinese provinces and cities.
+
+After 2015, the Moran's Index rose significantly, peaking in 2018. This suggests that the implementation of the second-child policy enhanced the spatial autocorrelation of birth rates across provinces. It is possible that the policy was more effective in some provinces, leading to a significant increase in birth rates in those areas. These high birth rate provinces are often clustered together, forming a spatial clustering effect.
+
+However, it is important to note that the global COVID-19 pandemic since 2020 may have impacted birth rates in China. Although the specific effects of the pandemic on birth rates are not yet clear, it is likely that the pandemic has altered people's lifestyles, which in turn affects their fertility intentions and behaviors. For example, economic instability, increased employment pressures, and strained medical resources may lead some families to delay or forgo having children. Therefore, we cannot ignore the potential impact of the pandemic on the spatial distribution and trends of birth rates in China, and further in-depth research is needed in the future.
+
+#Moran coefficient distribution diagram
+```{r}
+
+data_year_c <- c(2012, 2016, 2022)
+par(mfrow = c(1, 3), mar = c(5, 4, 4, 2) + 0.1)
+
+# Loop over each year and calculate Moran's I
+for (i in 1:3) {
+  # Filter data for the specific year
+  data_year <- final_data_geo[final_data_geo$year == data_year_c[i], ]
+  
+  # Extract coordinates
+  coords <- st_coordinates(st_as_sf(data_year))
+  coords_df <- data.frame(X = coords[, 1], Y = coords[, 2])
+  coords_mat <- as.matrix(coords_df)
+  
+  # Calculate k-nearest neighbor spatial weights
+  nb <- knn2nb(knearneigh(coords_mat, k = 15))
+  listw <- nb2listw(nb, style = "B", zero.policy = TRUE)
+  
+  # Calculate Moran's I
+  moran_I <- moran(data_year$fertility_rate, listw, n = 31, S0=Szero(listw))$I
+  
+  # Perform Monte Carlo simulation
+  moran_mc <- moran.mc(data_year$fertility_rate, listw, nsim = 999)
+  
+  moran_zvalue <- (moran_I - mean(moran_mc$res)) / sd(moran_mc$res)
+  
+  hist(moran_mc$res, breaks=100, col="lightblue", 
+       main=paste(data_year_c[i], "The empirical distribution of Moran's I"), 
+       xlab="Moran's I", ylab="Frequency")
+  
+  # Add the real Moran's I values
+  abline(v = moran_I, col = "red", lwd = 2)
+  
+  # Add the mean of the permutation distribution
+  abline(v = mean(moran_mc$res), col = "blue", lty = 2)
+  
+  # Add pseudo p-values
+  text(x = moran_I, y = 500, labels = paste("p =", round(moran_mc$p.value, 4)), col = "red")
+  
+  legend("topright", legend=c("Actual Moran's I", "Mean of the permutation distribution"), 
+         col=c("red", "blue"), lty=c(1, 2), lwd=c(2, 1), inset=c(-0.1, 0.05), bty="n", xpd=NA)
+}
+
+
+```
+
+The above charts show the histograms of the empirical distribution of Moran's Index (Moran's I) for the years 2012, 2016, and 2022.
+
+In all three years, the actual Moran's Index values are positive and significantly greater than the mean of the permutation distribution. The actual Moran's Index values are located far to the right of the positive skew, with very low p-values, indicating that this spatial autocorrelation is statistically highly significant.
+
+From 2012 to 2022, the birth rates in each province consistently exhibited significant positive spatial autocorrelation. This means that provinces with high birth rates are adjacent to other provinces with high birth rates, and provinces with low birth rates are adjacent to other provinces with low birth rates. This indicates a geographic clustering phenomenon in birth rates.
+
+In 2016 (the early stage of the second-child policy implementation), the spatial autocorrelation strengthened, suggesting that the policy might have had an impact on the spatial distribution of birth rates. Although the Moran's Index decreased slightly in 2022, it still shows significant spatial autocorrelation, indicating that this spatial clustering effect persists.
+
+
+# Local spatial aggregation effect
+
+Local Spatial Autocorrelation refers to the phenomenon where the attribute values of a specific region (such as birth rate, income level, etc.) are similar or correlated with those of neighboring regions in geographic space. This can be specifically manifested in the following types:
+
+High-High Cluster (HH): Areas with high attribute values are surrounded by areas with high attribute values.
+Low-Low Cluster (LL): Areas with low attribute values are surrounded by areas with low attribute values.
+High-Low Cluster (HL): Areas with high attribute values are surrounded by areas with low attribute values.
+Low-High Cluster (LH): Areas with low attribute values are surrounded by areas with high attribute values.
+
+Meaning of Local Moran's Index:
+
+Positive Value: Indicates that the attribute values of the region are similar to those of neighboring regions, i.e., high values are surrounded by high values or low values are surrounded by low values, demonstrating positive spatial autocorrelation.
+
+Negative Value: Indicates that the attribute values of the region are opposite to those of neighboring regions, i.e., high values are surrounded by low values or low values are surrounded by high values, demonstrating negative spatial autocorrelation.
+
+Significance Test: Using methods such as Monte Carlo simulation to test the significance of the Local Moran's Index, determining whether the spatial clustering effect is statistically significant.
+```{r}
+moran_city <- data.frame(province = character(),
+                         year = character(),
+                         moran_level = character(),
+                         stringsAsFactors = FALSE)
+# Create a data frame to store the results of the significance test
+lisa_results <- data.frame(
+  province = character(),
+  year = character(),
+  moran_level = character(),
+  significant = numeric(),
+  spatial_lag=numeric()
+)
+
+sca_plot <- list()
+data_year_b <- c(2004:2019,2021:2022)
+```
+
+
+```{r}
+# Loop over each year and calculate Moran's I
+for (i in 1:18) {
+  # Filter data for the specific year
+  data_year <- final_data_geo[final_data_geo$year == data_year_b[i], ]
+  
+  # Extract coordinates
+  coords <- st_coordinates(st_as_sf(data_year))
+  coords_df <- data.frame(X = coords[, 1], Y = coords[, 2])
+  coords_mat <- as.matrix(coords_df)
+  
+  # Calculate k-nearest neighbor spatial weights
+  nb <- knn2nb(knearneigh(coords_mat, k = 15))
+  listw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+  
+  local_moran <- localmoran(x = data_year$fertility_rate, listw = listw)
+  local_moran
+  # Local Moran's I results were extracted for each province
+  local_moran_values <- local_moran[,1]
+  
+  spatial_lag <- lag.listw(listw, local_moran_values)
+  
+  df <- data.frame(fertility_rate = data_year$fertility_rate, spatial_lag = spatial_lag)
+  
+  sca_plot[[i]]<-  ggplot(df, aes(x = fertility_rate, y = spatial_lag)) +
+    geom_point() +
+    # Add a horizontal line and a vertical line centered on the mean
+    geom_hline(yintercept = mean(df$spatial_lag), linetype = "dashed") +
+    geom_vline(xintercept = mean(df$fertility_rate), linetype = "dashed") +
+    labs(title = paste(data_year_b[i],"Spatial Lag Scatterplot"),
+         x = "Standardized Fertility Rate",
+         y = "Spatial Lag of Fertility Rate")
+  moran_levels <- as.vector(attr(local_moran, "quadr")[, "mean"])
+  moran_city2 <- as.data.frame(cbind(province=data_year$province,year=data_year$year,moran_levels))
+  moran_city <- rbind(moran_city,moran_city2)
+  
+  # Significance tests were performed
+  significant <- local_moran[,5]
+  quadrants <- attr(local_moran, "quadr")[, "mean"]
+  
+  lisa_results2 <- data.frame(
+    province = data_year$province,
+    year = data_year$year,
+    moran_level = quadrants,
+    significant = significant,
+    spatial_lag=spatial_lag
+  )
+  
+  lisa_results <- rbind(lisa_results,lisa_results2)
+  
+  
+}
+
+grid.arrange(sca_plot[[9]], sca_plot[[13]], sca_plot[[18]], ncol = 1)
+
+
+```
+Scatter Plots of Standardized Birth Rates and Their Spatial Lag for 2012, 2016, and 2022
+
+2012:
+The scatter plot shows a clear positive correlation, indicating that provinces with higher standardized birth rates also have higher spatial lag values. Many provinces' birth rates and spatial lags are in the upper right and lower left quadrants of the mean line, suggesting that these provinces' birth rates are similar to those of their neighboring provinces.
+
+2016:
+The scatter plot displays a more dispersed distribution, but a certain positive correlation can still be observed. Provinces with higher birth rates corresponding to higher spatial lag values are concentrated in the upper right quadrant, while provinces with lower birth rates corresponding to lower spatial lag values are concentrated in the lower left quadrant. Compared to 2012, the data points in 2016 are more scattered, indicating an increase in birth rate differences between provinces.
+
+2022:
+The scatter plot shows a certain positive correlation, but the correlation is weaker. Many data points are distributed in the lower right and upper left quadrants, indicating that some provinces' birth rates do not align with those of their neighboring provinces, reflecting a weakened spatial lag effect. Compared to 2012 and 2016, the data points in 2022 are more dispersed, suggesting that the differences in birth rates between provinces have further increased.
+
+Analysis:
+
+The scatter plots of local spatial instability reveal a certain degree of spatial heterogeneity in birth rates across Chinese provinces and cities, exhibiting various clustering phenomena, including H-H, L-H, L-L, and H-L types.
+
+Particularly in 2022, there is a noticeable decrease in the first quadrant. This decrease may reflect changes in the spatial correlation of birth rates. From the perspective of spatial correlation, this change could indicate that the differences in birth rates between provinces and cities are gradually narrowing, suggesting that birth rates are becoming more balanced or similar spatially.
+
+Several factors might influence this trend change. On one hand, it may be due to the government implementing a series of nationwide population policies, such as relaxing birth policies or strengthening their enforcement, leading to more consistent birth rates across regions. On the other hand, economic development disparities might also influence the spatial correlation of birth rates. If regional economic development levels are becoming more similar, it could lead to reduced differences in birth rates.
+
+Therefore, the noticeable decrease in the first quadrant in 2022 might be the result of these combined factors. This trend change merits further attention and research to better understand the spatial evolution of birth rates and to provide insights for future population policy formulation.
+
+```{r}
+a <- lisa_results[lisa_results$year%in%c(2012,2016,2022),]
+print(lisa_results[lisa_results$year%in%c(2012,2016,2022),])
+```
+# LISA (Local Indicator of Spatial Autocorrelation)
+```{r}
+
+lisa_results$year <- as.numeric(lisa_results$year )
+map <- list()
+
+
+DBDQ2 <- st_as_sf(DBDQ2)
+map <- list()
+
+for (i in 1:3) {
+  merged_data <- inner_join(lisa_results[lisa_results$year == data_year_c[i],], DBDQ2, by = c("province" = "name_1"))
+  
+  geom_col <- st_geometry(DBDQ2)
+  merged_data <- cbind(merged_data, geometry = geom_col[match(merged_data$province, DBDQ2$name_1)])
+  merged_data <- st_as_sf(merged_data)
+  
+  merged_data$moran_level <- ifelse(merged_data$significant > 0.05, 'non-significant', as.character(merged_data$moran_level))
+  
+  map[[i]] <- ggplot() + 
+    geom_sf(data = merged_data, aes(fill = moran_level)) +
+    scale_fill_manual(values = c("Low-Low" = "blue", "High-Low" = "green", "Low-High" = "orange",
+                                 "High-High" = "red", 'non-significant' = 'gray')) +
+    labs(title = paste(data_year_c[i], "Moran Level by Province")) +
+    theme_minimal()
+}
+grid.arrange(map[[1]], map[[2]], map[[3]], ncol = 3)
+
+as.data.frame(merged_data)[,1:2]
+```
+
+2012:
+The birth rates exhibited significant spatial heterogeneity, with clustering phenomena of H-H, L-H, L-L, and H-L types.
+
+H-H Clustering: Mainly concentrated in the southern regions, such as Hubei, Hunan, Guangdong, etc. These areas had relatively high and similar birth rates, possibly influenced by geographic and economic factors.
+
+L-L Clustering: Predominantly found in the northern regions, including the three northeastern provinces and the North China region, such as Liaoning, Jilin, and Heilongjiang. These areas had relatively low and similar birth rates, potentially influenced by economic development levels and population policies.
+
+2016:
+The spatial clustering of birth rates strengthened in 2016 compared to 2012, with an increase in the number and extent of H-H clustering areas.
+
+H-H Clustering remained significant in the southern regions. And L-L Clustering continued in the northern regions, indicating that the differences in birth rates between the southern and northern regions were maintained to some extent.
+
+2022:
+
+In 2022, the number of H-H clustering areas further increased, with more pronounced clustering in the southern regions.
+
+L-L Clustering persisted in the North China region, indicating that the pattern of relatively low birth rates in the northern regions had not changed significantly.
+
+```{r}
+
+# An empty data frame to store the results
+result <- data.frame(
+  Year = character(),
+  Total_Theil = numeric(),
+  Region_Theil_Within = numeric(),
+  Region_Theil_Between = numeric(),
+  Total_Contribution_Within = numeric(),
+  Total_Contribution_Between = numeric(),
+  stringsAsFactors = FALSE
+)
+
+```
+
+# Analysis of regional differences in birth rate
+
+Based on the spatial clustering of birth rates and the heterogeneity among provinces and cities, 31 provinces and cities were divided into four groups to analyze their regional differences:
+
+Group 1 (TW1): Includes Liaoning, Tianjin, Jilin, Heilongjiang, Beijing, Hebei, Inner Mongolia, and Shanxi. These provinces and cities have relatively low birth rates, showing low-low clustering, and are mainly distributed in the northern regions of China.
+
+Group 2 (TW2): Includes Tibet, Qinghai, Yunnan, Guizhou, Xinjiang, Ningxia, Guangxi, Gansu, and Hainan. These regions have relatively high birth rates and are broadly distributed, primarily concentrated in the western regions of China.
+
+Group 3 (TW3): Mainly covers the central and some southwestern regions, including Shaanxi, Sichuan, Chongqing, Hubei, Hunan, and Henan. The birth rates in these provinces and cities are at a medium level.
+
+Group 4 (TW4): Primarily located in the eastern regions, including Jiangxi, Fujian, Shandong, Anhui, Zhejiang, Jiangsu, Shanghai, and Guangdong. These regions have relatively high birth rates.
+
+Subsequently, the Theil index was calculated for different years.
+
+The Theil index is a statistical measure used to assess economic inequality or the distribution of a particular variable, such as income, within a population. It is part of the generalized entropy class of measures and provides insights into disparities by decomposing overall inequality into within-group and between-group components. 
+
+The 𝑇index represents the overall Theil index. 
+Tw1 represents the within-group Theil index for the first group, Tw2 represents the within-group Theil index for the second group, Tw3 represents the within-group Theil index for the third group, and 
+Tw4 represents the within-group Theil index for the fourth group. Db and Dw represent the contribution of between-group differences and within-group differences to the overall inequality, respectively.
+
+# Data preparation
+```{r}
+# Loop through the Theil index for each year
+
+region_mapping <- c(
+  "North" = c("Beijing", "Tianjin", "Hebei", "Shanxi", "Mongolia"),
+  "Northeast" = c("Liaoning", "Jilin", "Heilongjiang"),
+  "East" = c("Shanghai", "Jiangsu", "Zhejiang", "Anhui", "Fujian", "Jiangxi", "Shandong"),
+  "Central South" = c("Henan", "Hubei", "Hunan", "Guangdong", "Guangxi", "Hainan"),
+  "Southwest" = c("Chongqin", "Sichuan", "Guizhou", "Yunnan", "Tibet"),
+  "Northwest" = c("Shaanxi", "Gansu", "Qinghai", "Ningxia", "Xinjiang")
+)
+
+# Adds a region column to the data frame
+final_data_geo$region <- NA
+for (region in names(region_mapping)) {
+  final_data_geo$region[final_data_geo$province %in% region_mapping[[region]]] <- region
+}
+final_data_geo$region <- sub("\\d+$", "", final_data_geo$region)
+
+group1 <- c("Liaoning", "Tianjin", "Jilin", "Heilongjiang", "Beijing", "Hebei", "Mongolia", "Shanxi")
+group2 <- c("Tibet", "Qinghai", "Yunnan", "Guizhou", "Xinjiang", "Ningxia", "Guangxi", "Gansu", "Hainan")
+group3 <- c("Shaanxi", "Sichuan", "Chongqin", "Hubei", "Hunan", "Henan")
+group4 <- c("Jiangxi", "Fujian", "Shandong", "Anhui", "Zhejiang", "Jiangsu", "Shanghai", "Guangdong")
+
+TW_all <- final_data_geo[final_data_geo$year%in%c(2012,2016,2022),c(17,15,1,2)]
+TW_all$region <- ifelse(TW_all$province%in%group1,'TW1',
+                        ifelse(TW_all$province%in%group2,'TW2',
+                               ifelse(TW_all$province%in%group3,'TW3',
+                                      'TW4')))
+```
+
+```{r}
+#Define the Theil index calculation function
+TY_index <- function(x) {
+  n <- length(x)
+  mean_x <- mean(x)
+  term1 <- sum(x * log(x / mean_x))
+  term2 <- sum(x) * log(sum(x) / (n * mean_x))
+  tindex <- term1 - term2
+  return(tindex)
+}
+
+# Calculate Theil index for each group and year
+theil_indices <- list()
+
+for (year in c('2022', '2016', '2012')) {
+  # Subset the data for the current year
+  TW_year <- TW_all[TW_all$year == year, ]
+  
+  # Calculate Theil index for each group
+  TW <- TW_year %>%
+    group_by(region) %>%
+    summarize(tindex = TY_index(fertility_rate))
+  
+  # Calculate total Theil index (T)
+  tindex <- TY_index(TW_year$fertility_rate)
+  
+  # Calculate between-group Theil index (Tb)
+  Tb <- mean(TW$tindex)
+  
+  # Calculate within-group Theil index (Tw)
+  Tw <- tindex - Tb
+  
+  # Calculate the contributions of between-group and within-group differences to the total difference (Db and Dw)
+  Db <- Tb / tindex
+  Dw <- Tw / tindex
+  
+  # Store the results for the current year in the theil_indices list
+  theil_indices[[year]] <- c(
+    TW1 = TW$tindex[1],
+    TW2 = TW$tindex[2],
+    TW3 = TW$tindex[3],
+    TW4 = TW$tindex[4],
+    tindex = tindex,
+    Db = Db,
+    Dw = Dw
+  )
+}
+
+# Convert the list to a data frame
+theil_indices_df <- data.frame(
+  year = rep(c('2022', '2016', '2012'), each = length(theil_indices[[year]])),
+  region = rep(names(theil_indices[[year]]), times = 3),
+  value = unlist(theil_indices)
+)
+
+theil_indices_df
+
+theil_indices_wide <- pivot_wider(
+  data = theil_indices_df,
+  names_from = region,
+  values_from = value
+)
+
+columns_to_scale <- c("TW1", "TW2", "TW3", "TW4", "tindex")
+
+theil_indices_wide_scaled <- theil_indices_wide %>%
+  mutate(across(all_of(columns_to_scale), ~ scale(.x, center = min(.x), scale = max(.x) - min(.x)) * 0.028 + 0.002))
+
+# Extract the data for 2022
+theil_indices_wide_scaled <- theil_indices_wide_scaled[theil_indices_wide_scaled$year == 2022, ]
+
+theil_indices_wide_scaled
+```
+
+
+
+```{r}
+# Convert the list to a data frame
+theil_indices_df <- data.frame(
+  year = rep(c('2022', '2016', '2012'), each = length(theil_indices[[year]])),
+  region = rep(names(theil_indices[[year]]), times = 3),
+  value = unlist(theil_indices)
+)
+
+theil_indices_df
+
+
+# Reshape the data from long to wide format
+theil_indices_wide <- pivot_wider(
+  data = theil_indices_df,
+  names_from = region,
+  values_from = value
+)
+
+theil_indices_wide
+```
+
+
+```{r}
+columns_to_scale <- c("TW1", "TW2", "TW3", "TW4", "tindex")
+
+# Scale the specified columns
+theil_indices_wide_scaled <- theil_indices_wide %>%
+  mutate(across(all_of(columns_to_scale), ~ scale(.x, center = min(.x), scale = max(.x) - min(.x)) * 0.028 + 0.002))
+
+theil_indices_wide_scaled <- theil_indices_wide_scaled[theil_indices_wide_scaled$year==2022,]
+
+theil_indices_wide_scaled
+```
+
+The Theil Index for Different Regions:
+
+From the scaled Theil index, TW2 (including Tibet, Qinghai, Yunnan, Guizhou, Xinjiang, Ningxia, Guangxi, Gansu, and Hainan) has the highest level of inequality, at 0.03. The other three groups (TW1, TW3, TW4) have relatively lower levels of inequality, around 0.002.
+
+The overall Theil index (tindex) is 0.0177946, indicating the overall level of inequality. In the scaled data, the overall inequality level is 0.0177946, suggesting a certain degree of inequality overall.
+
+The between-group inequality contribution (Db) is 0.0944659, representing the contribution of inequality between different groups to the overall inequality. In 2022, the contribution of between-group inequality is 0.0944659, indicating that the inequality between different regions contributes little to the overall inequality.
+
+The within-group inequality contribution (Dw) is 0.9055341, representing the contribution of inequality within the same group to the overall inequality. In 2022, the contribution of within-group inequality is 0.9055341, indicating that inequality within the same group contributes significantly to the overall inequality.
+```{r}
+# Creating a data frame
+theil_indices_wide_scaled <- data.frame(
+  year = c(2012, 2016, 2022),
+  tindex = c(0.018, 0.027, 0.002),
+  tb= c(0.006, 0.017, 0.001),
+  tw= c(0.012, 0.01, 0.001),
+  TW1= c(0.041, 0.042, 0.001),
+  TW2= c(0.003, 0.002, 0.002),
+  TW3= c(0.006, 0.005, 0.004),
+  TW4= c(0.007, 0.023, 0.018),
+  Db= c(0.355, 0.63, 0.094),
+  Dw =c(0.645,0.37,0.906),
+  
+  stringsAsFactors = FALSE
+)
+
+ggplot(theil_indices_wide_scaled, aes(x = year)) +
+  geom_line(aes(y = TW1, color = "TW1")) +
+  geom_line(aes(y = TW2, color = "TW2")) +
+  geom_line(aes(y = TW3, color = "TW3")) +
+  geom_line(aes(y = TW4, color = "TW4")) +
+  geom_line(aes(y = tindex, color = "tindex")) +
+  geom_point(aes(y = TW1, color = "TW1"), shape = 16,size=8) +
+  geom_point(aes(y = TW2, color = "TW2"), shape = 16,size=8) +
+  geom_point(aes(y = TW3, color = "TW3"), shape = 16,size=8) +
+  geom_point(aes(y = TW4, color = "TW4"), shape = 16,size=8) +
+  geom_point(aes(y = tindex, color = "tindex"), shape = 16,size=8) +
+  geom_text(aes(label = sprintf("%.3f", tindex), y = tindex), vjust = -0.5, hjust = -0.5, color = "blue") +
+  geom_text(aes(label = sprintf("%.3f", TW1), y = TW1), vjust = -0.5, hjust = -0.5, color = "orange") +
+  geom_text(aes(label = sprintf("%.3f", TW2), y = TW2), vjust = -0.5, hjust = -0.5, color = "purple") +
+  geom_text(aes(label = sprintf("%.3f", TW3), y = TW3), vjust = -0.5, hjust = -0.5, color = "brown") +
+  geom_text(aes(label = sprintf("%.3f", TW4), y = TW4), vjust = -0.5, hjust = -0.5, color = "pink") +
+  labs(title = "Theil Index Over Years", y = "Value", color = "Index Type") +
+  scale_color_manual(values = c("TW1" = "blue", "TW2" = "orange", "TW3" = "green", "TW4" = "red", "tindex" = "purple")) +
+  theme_minimal()
+
+```
+
+```{r}
+
+ggplot(theil_indices_wide_scaled, aes(x = year)) +
+  geom_line(aes(y = Dw, color = "Dw")) +
+  geom_line(aes(y = Db, color = "Db")) +
+  
+  geom_point(aes(y = Dw, color = "Dw"), shape = 16,size=8) +
+  geom_point(aes(y = Db, color = "Db"), shape = 16,size=8) +
+  
+  
+  geom_text(aes(label = sprintf("%.3f", Dw), y = Dw), vjust = -0.5, hjust = -0.5, color = "orange") +
+  geom_text(aes(label = sprintf("%.3f", Db), y = Db), vjust = -0.5, hjust = -0.5, color = "purple") +
+  
+  labs(title = "Theil contribution rate Over Years", y = "Value", color = "Index Type") +
+  scale_color_manual(values = c( "Dw" = "orange",  "Db" = "purple")) +
+  theme_minimal()
+```
+
+We can observe that in 2022, the Theil index for each region is relatively low. At the same time, the index for the TW4 region (mainly East China) is relatively high. This situation indicates that, despite the overall Theil index decreasing, suggesting smaller differences, there is an opposite trend in other regions, such as the western areas, where the index has significantly dropped.
+
+This trend may stem from various factors. For example, in the western regions, there may be less policy support and resource investment, making it difficult to promote population birth rates. This could include the need for more education and healthcare resources, improving maternal and child health services, and implementing policies that encourage childbirth.
+
+In other regions, especially the TW1 area (mainly northern regions), there may be issues such as population aging and unbalanced economic development, leading to lower birth rates and thus impacting the overall Theil index.
+
+In the overall disparity analysis, in 2016, Dw < Db, indicating significant changes in between-group and within-group disparities for that year. This was also the initial year of the second-child policy, which increased the impact of between-group disparities on overall inequality. However, by 2022, the contribution of within-group disparities to the overall inequality far exceeded that of between-group disparities. Therefore, to reduce overall inequality, it may be necessary to focus on addressing the development imbalances within each region to promote overall balanced development. For instance, to properly implement the second-child policy, it is essential to formulate region-specific policies to meet the diverse needs of different areas.
+
+
+# Empirical analysis of factors affecting fertility rate
+```{r}
+colnames(final_data_geo)
+final_data_geo
+
+library(spatialreg)
+library(lmtest)
+library(car)
+```
+
+
+# Extract coordinates
+
+# Establish the spatial weight matrix
+
+## A robustness check is performed
+```{r}
+final_data_geo$year <- as.numeric(final_data_geo$year)
+
+# Suppose the model is named Model and the spatial weight matrix is listw
+sp_data <- final_data_geo[final_data_geo$year==2012,2:15]
+sp_data$second_time <- ifelse(sp_data$year<2016,0,1)
+sp_data <- sp_data[,-1]
+coords <- st_coordinates(st_as_sf(final_data_geo[final_data_geo$year==2012,]))
+coords_df <- data.frame(X = coords[, 1], Y = coords[, 2])
+coords_mat <- as.matrix(coords_df)
+nb <- knn2nb(knearneigh(coords_mat, k = 15))
+listw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+sp_data <- sp_data[, colSums(!is.na(sp_data)) > 0]
+model <- lm(fertility_rate ~ ., data = sp_data)
+
+```
+
+```{r}
+test_results <- lm.RStests(model, listw, test = "all", zero.policy = TRUE)
+print(test_results)
+```
+
+The R-LM (ERROR) test passed the significance test at the 0.05 level, indicating strong spatial autocorrelation in the data. The LM (lag) test for all three time points and the R-LM (lag) test for 2012 did not pass the significance test at the 0.05 level. However, the LM (error) and R-LM (error) tests for 2022 both passed the 0.05 significance test. Additionally, for each year, the values of LM (lag) were less than LM (error), and R-LM (lag) were less than R-LM (error). This suggests that the spatial error model is more suitable for explaining the relationship between birth rates and their influencing factors.
+
+
+# Spatial Lag Model (Lag Model) and Spatial Error Model (Error Model)
+
+```{r}
+# Calculate the Robust LM (error) statistic
+lm_lag <- test_results$RSlag
+print(lm_lag)
+# Calculate Robust LM (lag) statistic
+robust_lm_lag <- test_results$adjRSlag
+print(robust_lm_lag)
+
+# Calculate Lagrange Multiplier (error) statistic
+lm_error <- test_results$RSerr
+print(lm_error)
+
+# Calculate Robust LM (error) statistic
+robust_lm_error <- test_results$adjRSerr
+print(robust_lm_error)
+
+# Calculate Lagrange Multiplier (SARMA) statistic
+lm_sarma <- test_results$SARMA
+print(lm_sarma)
+```
+Lag Model:
+
+The Rao's Score statistic for spatial lag dependency is significant (p < 0.05), indicating a significant spatial lag effect in the model. This means that the birth rate in one region is influenced by the birth rates in neighboring regions. Additionally, the adjusted Rao's Score statistic for spatial lag dependency is significant (p < 0.01), further confirming the significant spatial lag effect in the model.
+
+It can be observed that factors such as education, CPI, and the proportion of higher education students have a significant impact on the spatial lag of birth rates. GDP and per capita disposable income also have a significant negative impact on the spatial lag of birth rates.
+
+Error Model:
+
+The Rao's Score statistic for spatial error dependency is not significant (p > 0.05), suggesting that there is no significant spatial error effect in the model. However, the adjusted Rao's Score statistic for spatial error dependency is close to significant at the 0.05 level (p close to 0.05), indicating a possible, but not strong, spatial error effect in the model.
+
+Factors such as urban unemployment rate, CPI, and the second-child policy have a significant impact on the spatial error of birth rates. Education expenditure, education employment rate, the proportion of higher education students, and per capita disposable income have a significant negative impact on the spatial error of birth rates.
+
+The SARMA (Spatial Autoregressive Moving Average) model's Rao's Score statistic is significant (p < 0.05), indicating significant spatial autoregressive and moving average effects in the model. This means that the spatial dependency effect cannot be explained solely by lag or error effects, but rather, there is a more complex spatial correlation.
+
+
+```{r}
+# Fit the spatial autocorrelation model
+sp_data <- final_data_geo[,2:15]
+sp_data$second_time <- ifelse(sp_data$year<2016,0,1)
+sp_data <- sp_data[,-1]
+coords <- st_coordinates(st_as_sf(final_data_geo))
+coords_df <- data.frame(X = coords[, 1], Y = coords[, 2])
+coords_mat <- as.matrix(coords_df)
+nb <- knn2nb(knearneigh(coords_mat, k = 15))
+listw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+
+spatial_model_lag <- lagsarlm(fertility_rate ~ .,data = sp_data, listw)
+spatial_model_error<- errorsarlm(fertility_rate ~ .,data = sp_data, listw)
+
+summary(spatial_model_lag)
+summary(spatial_model_error)
+
+```
+
+###The spatial error model has a significant impact on the release of the two-child policy, with p value 3.721e-06
+
+Analysis:
+
+We find that the AIC value of the error model (872.76) is smaller than that of the lag model (952.54), indicating that the spatial error model explains the data better. This may be because the spatial error model captures the impact of spatial errors more effectively, which the spatial lag model does not consider.
+
+By analyzing the size and significance of the coefficients, we can determine which variables are most important for influencing birth rates. For example, the coefficient for the education employment rate is -0.3444, with a very small p-value (0.000184), indicating a significant negative impact on birth rates. Additionally, the CPI coefficient is 0.2566, with a p-value of 0.0146, indicating a significant positive impact on birth rates.
+
+In the model, the coefficients and significance of economic factors such as GDP, urban unemployment rate, and per capita disposable income are also noteworthy. These factors may influence people's fertility decisions and thus have an important impact on birth rate changes. For example, the GDP coefficient is negative, indicating a negative correlation between birth rates and GDP, but the significance of the coefficient needs further consideration.
+
+Urban Unemployment Rate reflects the tension in the urban labor market. Higher unemployment rates may lead to reduced household income and economic instability, thereby lowering birth rates. In the model, the coefficient for the urban unemployment rate is positive, indicating that an increase in unemployment rate is associated with an increase in birth rates. This might reflect that reduced household income leads families to be more cautious in considering fertility issues.
+
+Per Capita Disposable Income represents the income remaining after necessary consumption, which is an important factor for households considering fertility. Higher disposable income means families have more economic capacity to bear the cost of raising children, potentially promoting fertility. In the model, the coefficient for per capita disposable income is negative, indicating a negative correlation between birth rates and disposable income. This might reflect that higher-income families place greater emphasis on career development and personal life, thus being less willing to take on the responsibility of raising children.
+
